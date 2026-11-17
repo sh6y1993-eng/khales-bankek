@@ -1,0 +1,6 @@
+{
+  "name": "خلّص بنكك — نموذج التصميم التفاعلي",
+  "description": "نموذج أولي تفاعلي لتصميم وتجربة لعبة الورق العربية «خلّص بنكك» على شاشات iPhone بالاتجاه العمودي وواجهة RTL.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
