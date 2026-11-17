@@ -71,6 +71,7 @@ export interface PrototypeBoardState {
   statusMessage: string;
   deckReshuffleCount: number;
   movesPlayed: number;
+  hasMovedHandToDoorThisTurn: boolean;
 }
 
 export interface RoomPlayer {
@@ -108,6 +109,11 @@ export interface UserProfile {
   avatar: string;
   demoMatchesPlayed: number;
   demoWins: number;
+  level: number;
+  coins: number;
+  xp: number;
+  maxXp: number;
+  notificationsCount: number;
 }
 
 export type BoardStyle = 'table3d' | 'classic';

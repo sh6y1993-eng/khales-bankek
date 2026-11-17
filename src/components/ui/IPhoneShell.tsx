@@ -199,21 +199,21 @@ export const IPhoneShell: React.FC<IPhoneShellProps> = ({
       </aside>
 
       {/* Single-Mount Responsive Stage: full-bleed on mobile, realistic iPhone frame on desktop */}
-      <main className="flex-1 flex flex-col lg:items-center lg:justify-center lg:p-6 lg:bg-[radial-gradient(circle_at_center,#0D372E_0%,#061814_75%)] overflow-auto">
+      <main className="flex-1 flex flex-col lg:items-center lg:justify-start lg:py-2.5 lg:px-6 lg:bg-[radial-gradient(circle_at_center,#0D372E_0%,#061814_75%)] overflow-auto">
         <div
           style={deviceCssVars}
-          className="relative flex flex-col w-full h-[100dvh] lg:w-[var(--iphone-w)] lg:h-[var(--iphone-h)] lg:rounded-[44px] lg:border-[8px] lg:border-[#182924] lg:shadow-[0_30px_80px_rgba(0,0,0,0.65),0_0_0_1px_rgba(212,162,67,0.25)] overflow-hidden felt-surface transition-all duration-200"
+          className="relative my-auto flex flex-col w-full h-[100dvh] lg:w-[var(--iphone-w)] lg:h-[min(var(--iphone-h),calc(100dvh-20px))] lg:rounded-[44px] lg:border-[7px] lg:border-[#182924] lg:shadow-[0_30px_80px_rgba(0,0,0,0.65),0_0_0_1px_rgba(212,162,67,0.25)] overflow-hidden felt-surface transition-all duration-200"
         >
           {/* iOS Top Status Bar + Safe Area (Desktop preview frame) */}
           <div
             dir="ltr"
-            className="hidden lg:flex shrink-0 h-11 px-6 items-center justify-between text-[11px] font-mono font-semibold text-[#F7F3E9]/90 select-none z-40"
+            className="hidden lg:flex shrink-0 h-8 px-6 items-center justify-between text-[11px] font-mono font-semibold text-[#F7F3E9]/90 select-none z-40"
           >
             <span className="tabular-nums">9:41</span>
             {activeDevice.hasDynamicIsland ? (
-              <div className="w-24 h-6 rounded-full bg-black border border-white/10" aria-hidden="true" />
+              <div className="w-20 h-4 rounded-full bg-black border border-white/10" aria-hidden="true" />
             ) : (
-              <div className="w-16 h-1.5 rounded-full bg-white/15" aria-hidden="true" />
+              <div className="w-14 h-1.5 rounded-full bg-white/15" aria-hidden="true" />
             )}
             <div className="flex items-center gap-1.5" aria-hidden="true">
               <span className="inline-block w-3.5 h-2.5 border border-[#F7F3E9]/80 rounded-[2px] p-[1px]">
@@ -228,7 +228,7 @@ export const IPhoneShell: React.FC<IPhoneShellProps> = ({
           </div>
 
           {/* iOS Home Indicator (Desktop preview frame) */}
-          <div className="hidden lg:flex shrink-0 h-5 items-center justify-center bg-transparent pointer-events-none z-40">
+          <div className="hidden lg:flex shrink-0 h-4 items-center justify-center bg-transparent pointer-events-none z-40">
             <div className="w-28 h-1 rounded-full bg-[#F7F3E9]/35" />
           </div>
         </div>

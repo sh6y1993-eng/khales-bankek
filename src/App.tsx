@@ -20,8 +20,18 @@ import {
 import { DESIGN_ASSETS } from './theme/designTokens';
 import { soundFx } from './utils/soundFx';
 import {
+  applyProgressionRewardToProfile,
+  INITIAL_PLAYER_ACCOUNTS,
+  loadAccountsStore,
+  PlayerAccountsMap,
+  resolveOrCreateAccount,
+  saveAccountsStore,
+} from './services/playerAccountService';
+import {
   SAMPLE_MULTIPLAYER_ROOMS,
+  autoPassPlayerTurnOnTimeout,
   buildMatchOutcome,
+  canEndPlayerTurn,
   canMoveCardToDoor,
   canPlayCardToCenter,
   createInitialBoardState,
@@ -62,14 +72,45 @@ export default function App() {
     boardStyle: 'table3d',
   });
 
-  const [profile, setProfile] = useState<UserProfile>({
-    name: 'سلطان المري',
-    handle: '@sultan_demo',
-    isGuest: false,
-    avatar: DESIGN_ASSETS.avatarPlayer,
-    demoMatchesPlayed: 4,
-    demoWins: 3,
-  });
+  const [accountsStore, setAccountsStore] = useState<{
+    accounts: PlayerAccountsMap;
+    activeId: string;
+  }>(() => loadAccountsStore());
+
+  const profile: UserProfile =
+    accountsStore.accounts[accountsStore.activeId] ?? INITIAL_PLAYER_ACCOUNTS.ahmed;
+
+  const updateActiveProfile = (updater: (prev: UserProfile) => UserProfile) => {
+    setAccountsStore((prevStore) => {
+      const current =
+        prevStore.accounts[prevStore.activeId] ?? INITIAL_PLAYER_ACCOUNTS.ahmed;
+      const updated = updater(current);
+      const nextAccounts = {
+        ...prevStore.accounts,
+        [prevStore.activeId]: updated,
+      };
+      saveAccountsStore(nextAccounts, prevStore.activeId);
+      return {
+        accounts: nextAccounts,
+        activeId: prevStore.activeId,
+      };
+    });
+  };
+
+  const switchActiveAccount = (name: string, isGuest: boolean) => {
+    setAccountsStore((prevStore) => {
+      const { nextAccounts, accountId } = resolveOrCreateAccount(
+        prevStore.accounts,
+        name,
+        isGuest
+      );
+      saveAccountsStore(nextAccounts, accountId);
+      return {
+        accounts: nextAccounts,
+        activeId: accountId,
+      };
+    });
+  };
 
   const [sampleRooms] = useState<SampleRoom[]>(SAMPLE_MULTIPLAYER_ROOMS);
   const [activeRoom, setActiveRoom] = useState<RoomConfig>({
@@ -138,13 +179,7 @@ export default function App() {
       setBoard((prev) => {
         if (prev.turnSecondsLeft <= 1) {
           if (prev.turnOwner === 'player') {
-            return {
-              ...prev,
-              selected: null,
-              turnOwner: 'opponent',
-              turnSecondsLeft: prev.turnDurationSeconds,
-              statusMessage: 'انتهى وقت دورك — انتقل الدور إلى الخصم',
-            };
+            return autoPassPlayerTurnOnTimeout(prev);
           }
           return prev;
         }
@@ -182,11 +217,7 @@ export default function App() {
         'أحسنت! قمت بتفريغ آخر بطاقة في بنكك قبل خصمك.'
       );
       setOutcome(winOutcome);
-      setProfile((p) => ({
-        ...p,
-        demoMatchesPlayed: p.demoMatchesPlayed + 1,
-        demoWins: p.demoWins + 1,
-      }));
+      updateActiveProfile((p) => applyProgressionRewardToProfile(p, 600, 450, 1, 1));
       soundFx.victory(settings.soundEnabled, settings.hapticsEnabled);
       setScreen('results');
     }
@@ -276,6 +307,13 @@ export default function App() {
   };
 
   const handleEndTurn = () => {
+    const check = canEndPlayerTurn(board);
+    if (!check.allowed) {
+      soundFx.invalidMove(settings.soundEnabled, settings.hapticsEnabled);
+      if (check.reason) showToast(check.reason);
+      setBoard((prev) => endPlayerTurnManually(prev));
+      return;
+    }
     soundFx.turnSwitch(settings.soundEnabled, settings.hapticsEnabled);
     setBoard((prev) => endPlayerTurnManually(prev));
   };
@@ -289,11 +327,15 @@ export default function App() {
         : 'تمكن الخصم من تفريغ بنكه أولاً في المعاينة التفاعلية.'
     );
     setOutcome(result);
-    setProfile((p) => ({
-      ...p,
-      demoMatchesPlayed: p.demoMatchesPlayed + 1,
-      demoWins: winner === 'player' ? p.demoWins + 1 : p.demoWins,
-    }));
+    updateActiveProfile((p) =>
+      applyProgressionRewardToProfile(
+        p,
+        winner === 'player' ? 600 : 150,
+        winner === 'player' ? 450 : 120,
+        1,
+        winner === 'player' ? 1 : 0
+      )
+    );
     if (winner === 'player') {
       soundFx.victory(settings.soundEnabled, settings.hapticsEnabled);
     } else {
@@ -399,13 +441,9 @@ export default function App() {
       {screen === 'splash' && (
         <SplashScreen
           onContinue={() => navigate('auth')}
+          onAutoComplete={() => navigate('home')}
           onSkipToHome={() => {
-            setProfile((p) => ({
-              ...p,
-              name: p.isGuest ? p.name : 'ضيف خلّص بنكك',
-              isGuest: true,
-              handle: '@guest_demo',
-            }));
+            switchActiveAccount('ضيف خلّص بنكك', true);
             navigate('home');
             showToast('تمت المتابعة كضيف');
           }}
@@ -416,12 +454,7 @@ export default function App() {
         <AuthScreen
           onBack={() => navigate('splash')}
           onAuthSuccess={(name, isGuest) => {
-            setProfile((p) => ({
-              ...p,
-              name,
-              isGuest,
-              handle: isGuest ? '@guest_demo' : '@player_demo',
-            }));
+            switchActiveAccount(name, isGuest);
             navigate('home');
             showToast(isGuest ? 'تم الدخول كضيف للتجربة' : `مرحباً ${name}`);
           }}
@@ -434,6 +467,21 @@ export default function App() {
           onNavigate={navigate}
           onQuickStartAi={() => startAiMatch('skilled', settings.preferredTurnSeconds)}
           onOpenRules={() => setRulesOpen(true)}
+          onClaimMissionReward={(rewardCoins, rewardXp) => {
+            soundFx.victory(settings.soundEnabled, settings.hapticsEnabled);
+            updateActiveProfile((p) =>
+              applyProgressionRewardToProfile(p, rewardCoins, rewardXp)
+            );
+            showToast(`تمت إضافة +${rewardCoins} عملة و +${rewardXp} نقطة خبرة`);
+          }}
+          onClearNotifications={() => {
+            updateActiveProfile((p) => ({ ...p, notificationsCount: 0 }));
+          }}
+          onSwitchAccount={(accountName, isGuest) => {
+            soundFx.click(settings.soundEnabled, settings.hapticsEnabled);
+            switchActiveAccount(accountName, isGuest);
+            showToast(`تم التبديل إلى حساب: ${accountName}`);
+          }}
         />
       )}
 
@@ -621,7 +669,7 @@ export default function App() {
           onBack={() => navigate('home')}
           onNavigate={navigate}
           onUpdateName={(newName) => {
-            setProfile((p) => ({ ...p, name: newName }));
+            updateActiveProfile((p) => ({ ...p, name: newName }));
             showToast('تم تحديث اسم اللاعب');
           }}
           onUpdateSettings={(partial) => {
@@ -686,14 +734,7 @@ export default function App() {
         onCancel={() => setDeleteAccountConfirm(false)}
         onConfirm={() => {
           setDeleteAccountConfirm(false);
-          setProfile({
-            name: 'ضيف الطاولة',
-            handle: '@guest_demo',
-            isGuest: true,
-            avatar: DESIGN_ASSETS.avatarPlayer,
-            demoMatchesPlayed: 0,
-            demoWins: 0,
-          });
+          switchActiveAccount('ضيف خلّص بنكك', true);
           navigate('splash');
           showToast('تمت محاكاة حذف الحساب بنجاح');
         }}

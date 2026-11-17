@@ -78,10 +78,26 @@ export function isRedSuit(suit: Suit): boolean {
   return suit === 'hearts' || suit === 'diamonds';
 }
 
-export function getNextExpectedCenterRank(pile: PlayingCardData[]): Rank | null {
-  if (pile.length === 0) return 'A';
+export function isDescendingCenterPile(pileIndex: number): boolean {
+  // Piles 0 and 1 start with A and go ascending (A -> K)
+  // Piles 2 and 3 start with K and go descending (K -> A)
+  return pileIndex >= 2;
+}
+
+export function getNextExpectedCenterRank(
+  pile: PlayingCardData[],
+  pileIndex = 0
+): Rank | null {
+  const isDescending = isDescendingCenterPile(pileIndex);
+  if (pile.length === 0) {
+    return isDescending ? 'K' : 'A';
+  }
   const topCard = pile[pile.length - 1];
   const currentVal = RANK_VALUES[topCard.rank];
+  if (isDescending) {
+    if (currentVal <= 1) return null;
+    return RANKS[currentVal - 2];
+  }
   if (currentVal >= 13) return null;
   return RANKS[currentVal];
 }
@@ -91,12 +107,16 @@ export function canPlayCardToCenter(
   pile: PlayingCardData[],
   pileIndex: number
 ): { valid: boolean; reason?: string; expectedRank: Rank | null } {
-  const expectedRank = getNextExpectedCenterRank(pile);
+  const isDescending = isDescendingCenterPile(pileIndex);
+  const pileLabel = isDescending
+    ? `الكومة ${pileIndex + 1} التنازلية (K → A)`
+    : `الكومة ${pileIndex + 1} التصاعدية (A → K)`;
+  const expectedRank = getNextExpectedCenterRank(pile, pileIndex);
   if (!expectedRank) {
     return {
       valid: false,
       expectedRank: null,
-      reason: `الكومة ${pileIndex + 1} مكتملة من A إلى K`,
+      reason: `${pileLabel} مكتملة`,
     };
   }
   if (card.rank !== expectedRank) {
@@ -104,29 +124,29 @@ export function canPlayCardToCenter(
       return {
         valid: false,
         expectedRank,
-        reason: `الترتيب مطلوب: الكومة ${pileIndex + 1} فارغة وتبدأ بالآس (A) فقط`,
+        reason: `الترتيب مطلوب: ${pileLabel} تبدأ ببطاقة (${expectedRank}) فقط`,
       };
     }
     const topCard = pile[pile.length - 1];
     return {
       valid: false,
       expectedRank,
-      reason: `الترتيب مطلوب: الكومة ${pileIndex + 1} تحتاج ${expectedRank} بعد ${topCard.rank}`,
+      reason: `الترتيب مطلوب: ${pileLabel} تحتاج ${expectedRank} فوق ${topCard.rank}`,
     };
   }
   return { valid: true, expectedRank };
 }
 
 export function canMoveCardToDoor(
-  card: PlayingCardData,
+  _card: PlayingCardData,
   source: CardSelectionSource,
-  targetDoorCards: PlayingCardData[],
+  _targetDoorCards: PlayingCardData[],
   targetDoorIndex: number
 ): { valid: boolean; reason?: string } {
   if (source.zone === 'bank') {
     return {
       valid: false,
-      reason: 'كروت البنك تُلعب في الأكوام المركزية فقط بالترتيب التصاعدي (A → K)',
+      reason: 'أوراق البنك تُلعب في كومات اللعب الأربع بالوسط فقط (تصاعدياً A→K أو تنازلياً K→A)',
     };
   }
   if (source.zone === 'door' && source.doorIndex === targetDoorIndex) {
@@ -135,27 +155,7 @@ export function canMoveCardToDoor(
       reason: 'البطاقة موجودة بالفعل في هذا الباب',
     };
   }
-  if (targetDoorCards.length === 0) {
-    return { valid: true };
-  }
-
-  const topDoor = targetDoorCards[targetDoorCards.length - 1];
-  const expectedVal = RANK_VALUES[topDoor.rank] - 1;
-  if (expectedVal < 1) {
-    return {
-      valid: false,
-      reason: `الباب ${targetDoorIndex + 1} ينتهي بالآس (A) ولا يقبل بطاقة تحته`,
-    };
-  }
-
-  const expectedRank = RANKS[expectedVal - 1];
-  if (RANK_VALUES[card.rank] !== expectedVal) {
-    return {
-      valid: false,
-      reason: `الترتيب مطلوب: الباب ${targetDoorIndex + 1} يحتاج ${expectedRank} تحت ${topDoor.rank} (ترتيب تنازلي)`,
-    };
-  }
-
+  // Doors accept any card freely without ascending/descending rank restriction
   return { valid: true };
 }
 
@@ -165,7 +165,8 @@ export function createInitialBoardState(options?: {
   difficulty?: AiDifficulty;
   turnDurationSeconds?: number;
 }): PrototypeBoardState {
-  const pool = createShuffledDeck();
+  // Use 2 shuffled decks so all 4 center piles (2 starting at A, 2 starting at K), banks, hands, and doors have full rank coverage
+  const pool = [...createShuffledDeck(), ...createShuffledDeck()];
 
   const pullRank = (rank: Rank): PlayingCardData => {
     const idx = pool.findIndex((c) => c.rank === rank);
@@ -179,40 +180,44 @@ export function createInitialBoardState(options?: {
     return pool.splice(0, count);
   };
 
-  // Start center piles with valid ascending sequences so ordering rules are clear from turn 1
+  // 4 Center Play Piles — NONE empty at game start:
+  // Piles 0 & 1: Two piles starting with 'A' (Ascending: A -> 2 -> 3 -> ... -> K)
+  // Piles 2 & 3: Two piles starting with 'K' (Descending: K -> Q -> J -> ... -> A)
   const centerPiles: PlayingCardData[][] = [
     [pullRank('A')],
-    [pullRank('A'), pullRank('2')],
-    [],
-    [],
+    [pullRank('A')],
+    [pullRank('K')],
+    [pullRank('K')],
   ];
 
-  // Ensure top Bank card (last item) is '3' so player has an immediate legal Bank->Center move on pile 2
-  const bankBase = pullMany(7);
-  const topBank = pullRank('3');
+  // Top Bank card is '2' so player has an immediate legal Bank->Center move onto either 'A' pile (or 'Q' onto 'K')
+  const bankBase = pullMany(9);
+  const topBank = pullRank('2');
   const playerBank = [...bankBase, topBank];
 
-  // Ensure Doors start in strict descending order
+  // All 5 Player Doors populated at start
   const playerDoors: PlayingCardData[][] = [
-    [pullRank('8'), pullRank('7')],
+    [pullRank('7')],
     [pullRank('Q')],
-    [pullRank('5'), pullRank('4')],
+    [pullRank('4')],
     [pullRank('9')],
     [pullRank('J')],
   ];
 
-  // Ensure Player Hand starts with at least an Ace + playable sequence cards
+  // Player Hand starts with 5 cards including playable ascending ('2', '3') & descending ('Q', 'J') cards
   const playerHand: PlayingCardData[] = [
-    pullRank('A'),
     pullRank('2'),
+    pullRank('Q'),
+    pullRank('3'),
+    pullRank('J'),
     pullRank('6'),
-    ...pullMany(2),
   ];
 
+  // All 5 Opponent Doors populated at start
   const opponentDoors: (PlayingCardData | null)[] = [
     pool.pop() ?? null,
     pool.pop() ?? null,
-    null,
+    pool.pop() ?? null,
     pool.pop() ?? null,
     pool.pop() ?? null,
   ];
@@ -233,12 +238,13 @@ export function createInitialBoardState(options?: {
     playerBank,
     playerDoors,
     opponentHandCount: 5,
-    opponentBankCount: 8,
+    opponentBankCount: 10,
     opponentDoors,
     selected: null,
-    statusMessage: 'دورك الآن — رتّب الأوراق تصاعدياً في الوسط (A → K) وتنازلياً في الأبواب',
+    statusMessage: 'دورك الآن — كومتان تبدآن بـ (A ↑ K) وكومتان تبدآن بـ (K ↓ A)، والأبواب حرة',
     deckReshuffleCount: 0,
     movesPlayed: 0,
+    hasMovedHandToDoorThisTurn: false,
   };
 }
 
@@ -279,8 +285,8 @@ export function selectCardInBoard(
   const sym = getSuitSymbol(card.suit);
   const hint =
     source.zone === 'bank'
-      ? `اختر كومة مركزية تحتاج ${card.rank} بالترتيب`
-      : 'اختر كومة مركزية (تصاعدي) أو باباً (تنازلي)';
+      ? `اختر كومة لعب تقبل ${card.rank} (تصاعدياً A→K أو تنازلياً K→A)`
+      : 'اختر كومة لعب بالوسط (تصاعدي/تنازلي) أو ضعها على أي باب';
 
   return {
     ...state,
@@ -351,32 +357,43 @@ export function playSelectedToCenter(
   let drawPile = [...state.drawPile];
   let deckReshuffleCount = state.deckReshuffleCount;
   let completedPile = false;
+  const isDescending = isDescendingCenterPile(pileIndex);
+  const completingRank: Rank = isDescending ? 'A' : 'K';
 
   const centerPiles = state.centerPiles.map((p, idx) => {
     if (idx !== pileIndex) return [...p];
     const updated = [...p, removed];
-    if (removed.rank === 'K') {
+    if (removed.rank === completingRank) {
       completedPile = true;
-      // Recycle completed A..K pile back into draw pile
+      // Recycle completed pile back into draw pile and keep starting card (A or K) so pile is never empty
+      const starterRank: Rank = isDescending ? 'K' : 'A';
       const recycled = [...updated];
       for (let i = recycled.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [recycled[i], recycled[j]] = [recycled[j], recycled[i]];
       }
+      const starterIdx = recycled.findIndex((c) => c.rank === starterRank);
+      const starterCard =
+        starterIdx !== -1 ? recycled.splice(starterIdx, 1)[0] : recycled.pop()!;
       drawPile = [...recycled, ...drawPile];
       deckReshuffleCount += 1;
-      return [];
+      return [starterCard];
     }
     return updated;
   });
 
   const bankCleared = playerBank.length === 0;
+  const pileLabel = isDescending
+    ? `الكومة ${pileIndex + 1} التنازلية (K→A)`
+    : `الكومة ${pileIndex + 1} التصاعدية (A→K)`;
 
-  let statusMessage = `تم وضع ${removed.rank}${getSuitSymbol(removed.suit)} في الكومة المركزية ${pileIndex + 1}`;
+  let statusMessage = `تم وضع ${removed.rank}${getSuitSymbol(removed.suit)} في ${pileLabel}`;
   if (bankCleared) {
     statusMessage = 'تم تفريغ آخر بطاقة في البنك!';
   } else if (completedPile) {
-    statusMessage = `اكتملت الكومة ${pileIndex + 1} حتى الملك (K) وفُتحت للآس (A) مجدداً!`;
+    statusMessage = isDescending
+      ? `اكتملت ${pileLabel} حتى الآس (A) وبدأت من الملك (K) مجدداً!`
+      : `اكتملت ${pileLabel} حتى الملك (K) وبدأت من الآس (A) مجدداً!`;
   }
 
   return {
@@ -417,6 +434,7 @@ export function moveSelectedToDoor(
   if (!removed) return state;
 
   playerDoors[targetDoorIndex] = [...playerDoors[targetDoorIndex], removed];
+  const movedHandToDoor = state.hasMovedHandToDoorThisTurn || source.zone === 'hand';
 
   return {
     ...state,
@@ -425,7 +443,8 @@ export function moveSelectedToDoor(
     playerDoors,
     selected: null,
     movesPlayed: state.movesPlayed + 1,
-    statusMessage: `تم ترتيب ${removed.rank}${getSuitSymbol(removed.suit)} في الباب ${targetDoorIndex + 1}`,
+    hasMovedHandToDoorThisTurn: movedHandToDoor,
+    statusMessage: `تم وضع ${removed.rank}${getSuitSymbol(removed.suit)} في الباب ${targetDoorIndex + 1}`,
   };
 }
 
@@ -434,7 +453,7 @@ export function drawCardToHand(state: PrototypeBoardState): PrototypeBoardState 
   if (state.playerHand.length >= 7) {
     return {
       ...state,
-      statusMessage: 'وصلت اليد إلى الحد التجريبي للعرض (7 بطاقات) — العب بطاقة أو رتّبها في باب',
+      statusMessage: 'وصلت اليد إلى الحد التجريبي للعرض (7 بطاقات) — العب بطاقة أو ضعها في باب',
     };
   }
 
@@ -475,8 +494,75 @@ export function sortPlayerHand(state: PrototypeBoardState): PrototypeBoardState 
   };
 }
 
+export function canEndPlayerTurn(state: PrototypeBoardState): {
+  allowed: boolean;
+  reason?: string;
+} {
+  if (state.turnOwner !== 'player') {
+    return { allowed: false, reason: 'الدور الآن للخصم' };
+  }
+  if (!state.hasMovedHandToDoorThisTurn && state.playerHand.length > 0) {
+    return {
+      allowed: false,
+      reason: 'لا يطوف دورك قبل نقل ورقة واحدة على الأقل من يدك إلى أحد الأبواب',
+    };
+  }
+  return { allowed: true };
+}
+
+function autoMoveOneHandCardToDoor(state: PrototypeBoardState): {
+  nextState: PrototypeBoardState;
+  movedCard: PlayingCardData | null;
+  doorIndex: number | null;
+} {
+  if (state.playerHand.length === 0) {
+    return { nextState: state, movedCard: null, doorIndex: null };
+  }
+
+  // Pick the door with the fewest cards (or empty door first) and place a card from hand
+  let chosenDoorIndex = 0;
+  let minLen = Infinity;
+  state.playerDoors.forEach((d, idx) => {
+    if (d.length < minLen) {
+      minLen = d.length;
+      chosenDoorIndex = idx;
+    }
+  });
+
+  const playerHand = [...state.playerHand];
+  const [movedCard] = playerHand.splice(0, 1);
+  if (!movedCard) {
+    return { nextState: state, movedCard: null, doorIndex: null };
+  }
+
+  const playerDoors = state.playerDoors.map((d, idx) =>
+    idx === chosenDoorIndex ? [...d, movedCard] : [...d]
+  );
+
+  return {
+    movedCard,
+    doorIndex: chosenDoorIndex,
+    nextState: {
+      ...state,
+      playerHand,
+      playerDoors,
+      selected: null,
+      movesPlayed: state.movesPlayed + 1,
+      hasMovedHandToDoorThisTurn: true,
+    },
+  };
+}
+
 export function endPlayerTurnManually(state: PrototypeBoardState): PrototypeBoardState {
   if (state.turnOwner !== 'player') return state;
+  const check = canEndPlayerTurn(state);
+  if (!check.allowed) {
+    return {
+      ...state,
+      statusMessage:
+        check.reason ?? 'لا يطوف دورك قبل نقل ورقة من يدك إلى أحد الأبواب',
+    };
+  }
   return {
     ...state,
     selected: null,
@@ -486,15 +572,43 @@ export function endPlayerTurnManually(state: PrototypeBoardState): PrototypeBoar
   };
 }
 
-export function simulateOpponentTurnStep(state: PrototypeBoardState): PrototypeBoardState {
-  let drawPile = [...state.drawPile];
-  if (drawPile.length === 0) {
-    drawPile = createShuffledDeck();
+export function autoPassPlayerTurnOnTimeout(state: PrototypeBoardState): PrototypeBoardState {
+  if (state.turnOwner !== 'player') return state;
+
+  if (!state.hasMovedHandToDoorThisTurn && state.playerHand.length > 0) {
+    const { nextState, movedCard, doorIndex } = autoMoveOneHandCardToDoor(state);
+    if (movedCard && doorIndex !== null) {
+      return {
+        ...nextState,
+        selected: null,
+        turnOwner: 'opponent',
+        turnSecondsLeft: nextState.turnDurationSeconds,
+        statusMessage: `انتهى الوقت — وضع الكمبيوتر تلقائياً ${movedCard.rank}${getSuitSymbol(movedCard.suit)} في الباب ${doorIndex + 1} وانتقل الدور للخصم`,
+      };
+    }
   }
 
-  // Pick a center pile and play the exact next ascending rank so AI also respects card order
+  return {
+    ...state,
+    selected: null,
+    turnOwner: 'opponent',
+    turnSecondsLeft: state.turnDurationSeconds,
+    statusMessage: 'انتهى وقت دورك — انتقل الدور إلى الخصم',
+  };
+}
+
+export function simulateOpponentTurnStep(state: PrototypeBoardState): PrototypeBoardState {
+  let drawPile = [...state.drawPile];
+  let deckReshuffleCount = state.deckReshuffleCount;
+
+  if (drawPile.length === 0) {
+    drawPile = createShuffledDeck();
+    deckReshuffleCount += 1;
+  }
+
+  // Pick one of the 4 center piles and play the exact next rank (Ascending on 0,1 and Descending on 2,3)
   const candidatePiles = state.centerPiles
-    .map((pile, idx) => ({ idx, expectedRank: getNextExpectedCenterRank(pile) }))
+    .map((pile, idx) => ({ idx, expectedRank: getNextExpectedCenterRank(pile, idx) }))
     .filter((entry): entry is { idx: number; expectedRank: Rank } => entry.expectedRank !== null);
 
   const chosen =
@@ -516,9 +630,17 @@ export function simulateOpponentTurnStep(state: PrototypeBoardState): PrototypeB
   const centerPiles = state.centerPiles.map((p, idx) => {
     if (idx !== chosen.idx) return [...p];
     const updated = [...p, playedCard];
-    if (playedCard.rank === 'K') {
-      drawPile = [...updated, ...drawPile];
-      return [];
+    const isDescending = isDescendingCenterPile(idx);
+    const completingRank: Rank = isDescending ? 'A' : 'K';
+    if (playedCard.rank === completingRank) {
+      const starterRank: Rank = isDescending ? 'K' : 'A';
+      const recycled = [...updated];
+      const starterIdx = recycled.findIndex((c) => c.rank === starterRank);
+      const starterCard =
+        starterIdx !== -1 ? recycled.splice(starterIdx, 1)[0] : recycled.pop()!;
+      drawPile = [...recycled, ...drawPile];
+      deckReshuffleCount += 1;
+      return [starterCard];
     }
     return updated;
   });
@@ -526,15 +648,38 @@ export function simulateOpponentTurnStep(state: PrototypeBoardState): PrototypeB
   const reduceBank = state.opponentBankCount > 1 && Math.random() > 0.35;
   const opponentBankCount = reduceBank ? state.opponentBankCount - 1 : state.opponentBankCount;
 
+  // Replenish player hand from drawPile up to 5 cards whenever turn returns to player
+  const playerHand = [...state.playerHand];
+  let replenishedCount = 0;
+  while (playerHand.length < 5) {
+    if (drawPile.length === 0) {
+      drawPile = createShuffledDeck();
+      deckReshuffleCount += 1;
+    }
+    const nextCard = drawPile.pop();
+    if (!nextCard) break;
+    playerHand.push(nextCard);
+    replenishedCount += 1;
+  }
+
+  const replenishNote =
+    replenishedCount > 0 ? ` · تم سحب ${replenishedCount} لإكمال يدك إلى 5 أوراق` : '';
+  const pileLabel = isDescendingCenterPile(chosen.idx)
+    ? `الكومة ${chosen.idx + 1} (تنازلية)`
+    : `الكومة ${chosen.idx + 1} (تصاعدية)`;
+
   return {
     ...state,
     drawPile,
+    deckReshuffleCount,
     centerPiles,
+    playerHand,
     opponentBankCount,
     turnOwner: 'player',
     turnNumber: state.turnNumber + 1,
     turnSecondsLeft: state.turnDurationSeconds,
-    statusMessage: `لعب الخصم ${playedCard.rank}${getSuitSymbol(playedCard.suit)} بالترتيب في الكومة ${chosen.idx + 1} · دورك الآن`,
+    hasMovedHandToDoorThisTurn: false,
+    statusMessage: `لعب الخصم ${playedCard.rank}${getSuitSymbol(playedCard.suit)} في ${pileLabel} · دورك الآن${replenishNote}`,
   };
 }
 

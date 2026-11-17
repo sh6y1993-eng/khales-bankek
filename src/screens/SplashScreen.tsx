@@ -6,6 +6,7 @@ import { AssetImage } from '../components/ui/AssetImage';
 interface SplashScreenProps {
   onContinue: () => void;
   onSkipToHome: () => void;
+  onAutoComplete?: () => void;
 }
 
 interface FanAceCardProps {
@@ -49,10 +50,19 @@ const FanAceCard: React.FC<FanAceCardProps> = ({ suit, isRed, className = '' }) 
 export const SplashScreen: React.FC<SplashScreenProps> = ({
   onContinue,
   onSkipToHome,
+  onAutoComplete,
 }) => {
   const [progress, setProgress] = useState(0);
   const [loadingLabel, setLoadingLabel] = useState('جاري تحميل الأصول والبطاقات...');
   const [isReady, setIsReady] = useState(false);
+
+  useEffect(() => {
+    if (!isReady || !onAutoComplete) return;
+    const autoTimer = window.setTimeout(() => {
+      onAutoComplete();
+    }, 550);
+    return () => window.clearTimeout(autoTimer);
+  }, [isReady, onAutoComplete]);
 
   useEffect(() => {
     let cancelled = false;

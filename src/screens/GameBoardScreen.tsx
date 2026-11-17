@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   XCircle,
   LayoutGrid,
+  Lock,
 } from 'lucide-react';
 import {
   CardSelectionSource,
@@ -379,21 +380,26 @@ export const GameBoardScreen: React.FC<GameBoardScreenProps> = ({
           <div className="grid grid-cols-4 gap-3 justify-items-center items-center">
             {board.centerPiles.map((pile, idx) => {
               const topCard = pile[pile.length - 1] ?? null;
+              const isDescending = idx >= 2;
               const isValidCenterTarget =
                 hasSelected &&
                 isPlayerTurn &&
                 canPlayCardToCenter(board.selected!.card, pile, idx).valid;
               return (
-                <PlayingCard
-                  key={idx}
-                  card={topCard}
-                  size="lg"
-                  largeText={largeCardText}
-                  playableHighlight={isValidCenterTarget}
-                  onClick={hasSelected && isPlayerTurn ? () => onPlayToCenter(idx) : undefined}
-                  emptyLabel={`كومة ${idx + 1} · A`}
-                  badgeText={pile.length > 1 ? `${pile.length}` : undefined}
-                />
+                <div key={idx} className="flex flex-col items-center gap-1">
+                  <PlayingCard
+                    card={topCard}
+                    size="lg"
+                    largeText={largeCardText}
+                    playableHighlight={isValidCenterTarget}
+                    onClick={hasSelected && isPlayerTurn ? () => onPlayToCenter(idx) : undefined}
+                    emptyLabel={isDescending ? `كومة ${idx + 1} · K` : `كومة ${idx + 1} · A`}
+                    badgeText={pile.length > 1 ? `${pile.length}` : undefined}
+                  />
+                  <span className="text-[9.5px] font-bold text-[#E6B95E] tabular-nums whitespace-nowrap">
+                    {isDescending ? 'تنازلي K↓A' : 'تصاعدي A↑K'}
+                  </span>
+                </div>
               );
             })}
           </div>
@@ -558,9 +564,16 @@ export const GameBoardScreen: React.FC<GameBoardScreenProps> = ({
               type="button"
               onClick={onEndTurn}
               disabled={!isPlayerTurn}
-              className="min-h-[44px] px-2 rounded-xl bg-[#D4A243] text-[#061814] text-xs font-extrabold hover:bg-[#E6B95E] disabled:opacity-45 whitespace-nowrap"
+              className={`min-h-[44px] px-2 rounded-xl text-xs font-extrabold disabled:opacity-45 flex items-center justify-center gap-1 whitespace-nowrap transition-colors ${
+                board.hasMovedHandToDoorThisTurn || board.playerHand.length === 0
+                  ? 'bg-[#D4A243] text-[#061814] hover:bg-[#E6B95E]'
+                  : 'bg-[#08231D] border border-[#D4A243]/55 text-[#FDE68A]'
+              }`}
             >
-              إنهاء الدور
+              {!board.hasMovedHandToDoorThisTurn && board.playerHand.length > 0 ? (
+                <Lock className="w-3.5 h-3.5 text-[#FDE68A] shrink-0" />
+              ) : null}
+              <span>إنهاء الدور</span>
             </button>
           </div>
         </section>
